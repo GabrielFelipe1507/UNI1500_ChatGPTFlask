@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block title %}ChatGPT Flask{% endblock %}
+
+{% block content %}
+    <h1>ChatGPT com Flask</h1>
+    <input type="text" id="userInput" placeholder="Digite sua mensagem...">
+    <button onclick="sendMessage()">Enviar</button>
+    <div id="chatOutput"></div>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+{% endblock %}

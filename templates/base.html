@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="pt">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatGPT Flask</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+    <div class="chat-container">
+        <button class="toggle-btn" style="background-color: rgb(228, 226, 226); font-size: 1.5em;"
+            onclick="toggleSidebar()">☰</button>
+
+        <!-- Menu lateral -->
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2>ChatGPT Flask</h2>
+            </div>
+            <div class="search-bar">
+                <input type="text" id="searchInput" placeholder="Buscar chats..." onkeyup="filterChats()">
+                <span class="search-icon">🔍</span>
+            </div>
+            <button class="new-chat-btn" onclick="addNewChat()">+ Nova Conversa</button>
+
+            <!-- Seções de conversas -->
+            <div class="chat-section" id="todaySection">
+                <h3>Conversas de Hoje</h3>
+                <div class="chat-list" id="chatListToday" style="overflow-y: auto; max-height: 80vh;"></div>
+            </div>
+            <div class="chat-section" id="yesterdaySection">
+                <h3>Conversas de Ontem</h3>
+                <div class="chat-list" id="chatListYesterday" style="overflow-y: auto; max-height: 80vh;"></div>
+            </div>
+            <div class="chat-section" id="olderSection">
+                <h3>Conversas Antigas</h3>
+                <div class="chat-list" id="chatListOlder" style="overflow-y: auto; max-height: 80vh;"></div>
+            </div>
+        </div>
+
+        <!-- Área de chat -->
+        <div class="chat-main">
+            <div id="chatOutput" class="chat-output"></div>
+            <div class="chat-input">
+                <input type="text" id="userInput" placeholder="Digite sua mensagem...">
+                <button onclick="sendMessage()">Enviar</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let conversations = {};
+        let currentChat = null;
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('collapsed');
+        }
+
+        function addNewChat() {
+            const todaySection = document.getElementById('chatListToday');
+            const yesterdaySection = document.getElementById('chatListYesterday');
+            const olderSection = document.getElementById('chatListOlder');
+            const chatId = `Chat ${Object.keys(conversations).length + 1}`;
+            const newChat = document.createElement('div');
+            newChat.className = 'chat-item';
+            newChat.innerHTML = `${chatId} <span class="edit-icon" onclick="editChat(event, '${chatId}')">✏️</span> <span class="delete-icon" onclick="deleteChat(event, '${chatId}')">🗑️</span>`;
+            newChat.onclick = (e) => { if (e.target !== newChat.querySelector('.delete-icon') && e.target !== newChat.querySelector('.edit-icon')) openChat(chatId); };
+
+            const date = new Date();
+            conversations[chatId] = { messages: [], date: date };
+
+            const messageDate = date;
+            const formattedDate = formatDate(messageDate);
+
+            const firstMessage = "Clique para iniciar o chat";
+
+            newChat.innerHTML = `${firstMessage} <span class="time-label">${getFormattedTime(date)}</span> <span class="edit-icon" onclick="editChat(event, '${chatId}')">✏️</span> <span class="delete-icon" onclick="deleteChat(event, '${chatId}')">🗑️</span>`;
+
+            if (isToday(messageDate)) {
+                todaySection.appendChild(newChat);
+            } else if (isYesterday(messageDate)) {
+                yesterdaySection.appendChild(newChat);
+            } else {
+                olderSection.appendChild(newChat);
+            }
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('userInput');
+            const message = input.value.trim();
+            if (message && currentChat) {
+                const date = new Date();
+                const formattedMessage = `${getFormattedTime(date)} - Você: ${message}`;
+
+                conversations[currentChat].messages.push({ message: formattedMessage, date: date });
+
+                const chatOutput = document.getElementById('chatOutput');
+                const msgDiv = document.createElement('div');
+                msgDiv.classList.add('user-message');  // Classe para mensagem do usuário
+                msgDiv.textContent = formattedMessage;
+                chatOutput.appendChild(msgDiv);
+                chatOutput.scrollTop = chatOutput.scrollHeight;
+
+                if (conversations[currentChat].messages.length === 1) {
+                    const chatItem = document.querySelector(`.chat-item:nth-child(${Object.keys(conversations).indexOf(currentChat) + 1})`);
+                    chatItem.innerHTML = `${message} <span class="time-label">${getFormattedTime(date)}</span> <span class="edit-icon" onclick="editChat(event, '${currentChat}')">✏️</span> <span class="delete-icon" onclick="deleteChat(event, '${currentChat}')">🗑️</span>`;
+                }
+
+                input.value = '';
+
+                // Enviar a mensagem para o backend
+                fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ message: message }),
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        const gptMessage = data.response;
+                        const gptMsgDiv = document.createElement('div');
+                        gptMsgDiv.classList.add('gpt-message');  // Classe para mensagem do ChatGPT
+
+                        if (Array.isArray(gptMessage) && gptMessage.length > 0 && typeof gptMessage[0] === 'object') {
+                            // Se a resposta for uma lista de objetos, cria uma tabela
+                            const table = document.createElement('table');
+                            const thead = document.createElement('thead');
+                            const tbody = document.createElement('tbody');
+
+                            // Cria o cabeçalho da tabela com as colunas
+                            const headerRow = document.createElement('tr');
+                            Object.keys(gptMessage[0]).forEach(key => {
+                                const th = document.createElement('th');
+                                th.textContent = key;
+                                headerRow.appendChild(th);
+                            });
+                            thead.appendChild(headerRow);
+                            table.appendChild(thead);
+
+                            // Preenche o corpo da tabela com os dados
+                            gptMessage.forEach(row => {
+                                const tr = document.createElement('tr');
+                                Object.values(row).forEach(value => {
+                                    const td = document.createElement('td');
+                                    td.textContent = value;
+                                    tr.appendChild(td);
+                                });
+                                tbody.appendChild(tr);
+                            });
+                            table.appendChild(tbody);
+
+                            gptMsgDiv.appendChild(table);
+                        } else {
+                            // Se a resposta não for uma lista, exibe como texto
+                            gptMsgDiv.textContent = gptMessage;
+                        }
+
+                        chatOutput.appendChild(gptMsgDiv);
+                        chatOutput.scrollTop = chatOutput.scrollHeight;
+                    });
+            } else {
+                alert('Selecione uma conversa primeiro!');
+            }
+        }
+
+        function openChat(chatId) {
+            currentChat = chatId;
+            const chatOutput = document.getElementById('chatOutput');
+            chatOutput.innerHTML = '';
+
+            conversations[chatId].messages.forEach(msgObj => {
+                const msgDiv = document.createElement('div');
+                msgDiv.classList.add(msgObj.message.includes("Você") ? 'user-message' : 'gpt-message'); // Verifica se é do usuário ou GPT
+                msgDiv.textContent = msgObj.message;
+                chatOutput.appendChild(msgDiv);
+            });
+        }
+
+        function filterChats() {
+            const input = document.getElementById('searchInput').value.toLowerCase();
+            const chats = document.querySelectorAll('.chat-item');
+            chats.forEach(chat => {
+                const text = chat.textContent.toLowerCase();
+                chat.style.display = text.includes(input) ? '' : 'none';
+            });
+        }
+
+        function deleteChat(event, chatId) {
+            event.stopPropagation();
+            delete conversations[chatId];
+            event.target.parentElement.remove();
+            if (currentChat === chatId) {
+                document.getElementById('chatOutput').innerHTML = '';
+                currentChat = null;
+            }
+        }
+
+        function editChat(event, chatId) {
+            event.stopPropagation();
+            const newMessage = prompt("Editar conversa:", conversations[chatId].messages[0].message);
+            if (newMessage) {
+                conversations[chatId].messages[0].message = newMessage;
+
+                // Atualizar a exibição da conversa
+                const chatItem = document.querySelector(`.chat-item:nth-child(${Object.keys(conversations).indexOf(chatId) + 1})`);
+                chatItem.innerHTML = `${newMessage} <span class="time-label">${getFormattedTime(new Date())}</span> <span class="edit-icon" onclick="editChat(event, '${chatId}')">✏️</span> <span class="delete-icon" onclick="deleteChat(event, '${chatId}')">🗑️</span>`;
+
+                // Recarregar o chat na área principal
+                openChat(chatId);
+            }
+        }
+
+        function getFormattedTime(date) {
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            return `${hours}:${minutes}`;
+        }
+
+        function isToday(date) {
+            const today = new Date();
+            return date.getDate() === today.getDate() &&
+                date.getMonth() === today.getMonth() &&
+                date.getFullYear() === today.getFullYear();
+        }
+
+        function isYesterday(date) {
+            const today = new Date();
+            const yesterday = new Date(today);
+            yesterday.setDate(today.getDate() - 1);
+            return date.getDate() === yesterday.getDate() &&
+                date.getMonth() === yesterday.getMonth() &&
+                date.getFullYear() === yesterday.getFullYear();
+        }
+
+        function formatDate(date) {
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            return `${day}/${month}/${year}`;
+        }
+
+        // Adicionando o evento "Enter" no campo de input
+        document.getElementById('userInput').addEventListener('keypress', function (event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    </script>
+
+    <style>
+        .sidebar {
+            transition: width 0.3s;
+            width: 250px;
+        }
+
+        .sidebar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5px;
+        }
+
+        .toggle-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1.2em;
+        }
+
+        .search-bar input {
+            width: 100%;
+        }
+
+        .chat-item {
+            font-size: 0.85em;
+            padding: 5px 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .delete-icon {
+            color: red;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+
+        .edit-icon {
+            color: blue;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+
+        .time-label {
+            font-size: 0.8em;
+            color: #888;
+        }
+
+        .user-message {
+            background-color: #e0f7fa;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 5px;
+        }
+
+        .gpt-message {
+            background-color: #f1f8e9;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 5px;
+        }
+    </style>
+</body>
+
+</html>
